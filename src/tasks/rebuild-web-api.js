@@ -85,6 +85,12 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 						return 'NONE';
 					}
 				},
+				authorizationScopes = function () {
+					if (methodOptions && methodOptions.authorizationScopes && Array.isArray(methodOptions.authorizationScopes)){
+						return methodOptions.authorizationScopes;
+					}
+					return null;
+				},
 				credentials = function () {
 					if (methodOptions && methodOptions.invokeWithCredentials) {
 						if (methodOptions.invokeWithCredentials === true) {
@@ -118,6 +124,7 @@ module.exports = function rebuildWebApi(functionName, functionVersion, restApiId
 			return apiGateway.putMethodPromise({
 				authorizationType: authorizationType(),
 				authorizerId: authorizerId(),
+				authorizationScopes: authorizationScopes(),
 				httpMethod: methodName,
 				resourceId: resourceId,
 				restApiId: restApiId,
