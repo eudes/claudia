@@ -1,11 +1,12 @@
 /*global describe, it, expect, beforeEach, afterEach  */
 const underTest = require('../src/tasks/add-policy'),
 	destroyObjects = require('./util/destroy-objects'),
+	awsRegion = require('./util/test-aws-region'),
 	aws = require('aws-sdk');
 describe('addPolicy', () => {
 	'use strict';
 	let testRunName;
-	const iam = new aws.IAM(),
+	const iam = new aws.IAM({ region: awsRegion }),
 		lambdaRolePolicy = {
 			Version: '2012-10-17',
 			Statement: [{
@@ -29,7 +30,7 @@ describe('addPolicy', () => {
 	});
 	it('appends a policy from the templates folder to the role', done => {
 		const expectedPolicy = require('../json-templates/log-writer');
-		underTest('log-writer', testRunName)
+		underTest(iam, 'log-writer', testRunName)
 		.then(() =>
 			iam.getRolePolicy({
 				PolicyName: 'log-writer',

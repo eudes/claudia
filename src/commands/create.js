@@ -39,8 +39,9 @@ module.exports = function create(options, optionalLogger) {
 		awsRetries = options && options['aws-retries'] && parseInt(options['aws-retries'], 10) || 15,
 		source = (options && options.source) || process.cwd(),
 		configFile = (options && options.config) || path.join(source, 'claudia.json'),
-		iam = loggingWrap(new aws.IAM(), {log: logger.logApiCall, logName: 'iam'}),
+		iam = loggingWrap(new aws.IAM({region: options.region}), {log: logger.logApiCall, logName: 'iam'}),
 		lambda = loggingWrap(new aws.Lambda({region: options.region}), {log: logger.logApiCall, logName: 'lambda'}),
+		s3 = loggingWrap(new aws.S3({region: options.region, signatureVersion: 'v4'}), {log: logger.logApiCall, logName: 's3'}),
 		apiGatewayPromise = retriableWrap(
 			loggingWrap(new aws.APIGateway({region: options.region}), {log: logger.logApiCall, logName: 'apigateway'}),
 			() => logger.logStage('rate-limited by AWS, waiting before retry')
@@ -150,7 +151,7 @@ module.exports = function create(options, optionalLogger) {
 						KMSKeyArn: options['env-kms-key-arn'],
 						Handler: options.handler || (options['api-module'] + '.proxyRouter'),
 						Role: roleArn,
-						Runtime: options.runtime || 'nodejs8.10',
+						Runtime: options.runtime || 'nodejs10.x',
 						Publish: true,
 						Layers: options.layers && options.layers.split(','),
 						VpcConfig: options['security-group-ids'] && options['subnet-ids'] && {
@@ -300,7 +301,7 @@ module.exports = function create(options, optionalLogger) {
 		addExtraPolicies = function () {
 			return Promise.all(policyFiles().map(fileName => {
 				const policyName = path.basename(fileName).replace(/[^A-z0-9]/g, '-');
-				return addPolicy(policyName, roleMetadata.Role.RoleName, fileName);
+				return addPolicy(iam, policyName, roleMetadata.Role.RoleName, fileName);
 			}));
 		},
 		recursivePolicy = function (functionName) {
@@ -359,7 +360,7 @@ module.exports = function create(options, optionalLogger) {
 	})
 	.then(() => {
 		if (!options.role) {
-			return addPolicy('log-writer', roleMetadata.Role.RoleName);
+			return addPolicy(iam, 'log-writer', roleMetadata.Role.RoleName);
 		}
 	})
 	.then(() => {
@@ -386,7 +387,7 @@ module.exports = function create(options, optionalLogger) {
 			}).promise();
 		}
 	})
-	.then(() => lambdaCode(packageArchive, options['use-s3-bucket'], options['s3-sse'], logger))
+	.then(() => lambdaCode(s3, packageArchive, options['use-s3-bucket'], options['s3-sse']))
 	.then(functionCode => {
 		s3Key = functionCode.S3Key;
 		return createLambda(functionName, functionDesc, functionCode, roleMetadata.Role.Arn);
@@ -484,7 +485,7 @@ module.exports.doc = {
 			argument: 'runtime',
 			optional: true,
 			description: 'Node.js runtime to use. For supported values, see\n http://docs.aws.amazon.com/lambda/latest/dg/API_CreateFunction.html',
-			default: 'nodejs8.10'
+			default: 'nodejs10.x'
 		},
 		{
 			argument: 'description',

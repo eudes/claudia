@@ -20,8 +20,9 @@ describe('create', () => {
 	'use strict';
 
 
-	let workingdir, testRunName, iam, lambda, newObjects, config, logs, apiGatewayPromise;
-	const createFromDir = function (dir, logger) {
+	let workingdir, testRunName, iam, lambda, s3, newObjects, config, logs, apiGatewayPromise;
+	const defaultRuntime = 'nodejs10.x',
+		createFromDir = function (dir, logger) {
 			if (!fs.existsSync(workingdir)) {
 				fs.mkdirSync(workingdir);
 			}
@@ -48,8 +49,9 @@ describe('create', () => {
 			return lambda.getFunctionConfiguration({ FunctionName: testRunName }).promise();
 		};
 	beforeAll(() => {
-		iam = new aws.IAM();
+		iam = new aws.IAM({ region: awsRegion });
 		lambda = new aws.Lambda({ region: awsRegion });
+		s3 = new aws.S3({region: awsRegion, signatureVersion: 'v4'});
 		apiGatewayPromise = retriableWrap(new aws.APIGateway({ region: awsRegion }));
 		logs = new aws.CloudWatchLogs({ region: awsRegion });
 	});
@@ -523,17 +525,17 @@ describe('create', () => {
 		});
 	});
 	describe('runtime support', () => {
-		it('creates node 8.10 deployments by default', done => {
+		it('creates node 10 deployments by default', done => {
+			createFromDir('hello-world')
+			.then(getLambdaConfiguration)
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(defaultRuntime))
+			.then(done, done.fail);
+		});
+		it('can create nodejs8.10 when requested', done => {
+			config.runtime = 'nodejs8.10';
 			createFromDir('hello-world')
 			.then(getLambdaConfiguration)
 			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs8.10'))
-			.then(done, done.fail);
-		});
-		it('can create nodejs6.10 when requested', done => {
-			config.runtime = 'nodejs6.10';
-			createFromDir('hello-world')
-			.then(getLambdaConfiguration)
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs6.10'))
 			.then(done, done.fail);
 		});
 	});
@@ -661,7 +663,7 @@ describe('create', () => {
 				});
 			})
 			.then(() => lambda.getFunctionConfiguration({ FunctionName: 'hello-world2' }).promise())
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs8.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(defaultRuntime))
 			.then(done, done.fail);
 		});
 		it('renames scoped NPM packages to a sanitized Lambda name', done => {
@@ -675,7 +677,7 @@ describe('create', () => {
 				});
 			})
 			.then(() => lambda.getFunctionConfiguration({ FunctionName: 'test_hello-world' }).promise())
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs8.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(defaultRuntime))
 			.then(done, done.fail);
 		});
 		it('uses the package.json description field if --description is not provided', done => {
@@ -799,8 +801,7 @@ describe('create', () => {
 			.then(done, done.fail);
 		});
 		it('uses a s3 bucket if provided', done => {
-			const s3 = new aws.S3(),
-				logger = new ArrayLogger(),
+			const logger = new ArrayLogger(),
 				bucketName = `${testRunName}-bucket`;
 			let archivePath;
 			config.keep = true;
@@ -831,8 +832,7 @@ describe('create', () => {
 			.then(done, done.fail);
 		});
 		it('uses a s3 bucket with server side encryption if provided', done => {
-			const s3 = new aws.S3(),
-				logger = new ArrayLogger(),
+			const logger = new ArrayLogger(),
 				bucketName = `${testRunName}-bucket`,
 				serverSideEncryption = 'AES256';
 			let archivePath;
@@ -1165,7 +1165,7 @@ describe('create', () => {
 			expect(logger.getApiCallLogForService('lambda', true)).toEqual([
 				'lambda.createFunction',  'lambda.setupRequestListeners', 'lambda.updateAlias', 'lambda.createAlias'
 			]);
-			expect(logger.getApiCallLogForService('iam', true)).toEqual(['iam.createRole']);
+			expect(logger.getApiCallLogForService('iam', true)).toEqual(['iam.createRole', 'iam.putRolePolicy']);
 			expect(logger.getApiCallLogForService('sts', true)).toEqual(['sts.getCallerIdentity']);
 			expect(logger.getApiCallLogForService('apigateway', true)).toEqual([
 				'apigateway.createRestApi',
@@ -1306,7 +1306,7 @@ describe('create', () => {
 	describe('layer support', () => {
 		let layers;
 		const createLayer = function (layerName, filePath) {
-				return lambdaCode(filePath)
+				return lambdaCode(s3, filePath)
 					.then(contents => lambda.publishLayerVersion({LayerName: layerName, Content: contents}).promise());
 			}, deleteLayer = function (layer) {
 				return lambda.deleteLayerVersion({

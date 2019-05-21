@@ -15,7 +15,7 @@ const underTest = require('../src/commands/update'),
 	lambdaCode = require('../src/tasks/lambda-code');
 describe('update', () => {
 	'use strict';
-	let workingdir, testRunName,  lambda, newObjects;
+	let workingdir, testRunName,  lambda, s3, newObjects;
 	const invoke = function (url, options) {
 			if (!options) {
 				options = {};
@@ -28,6 +28,7 @@ describe('update', () => {
 		};
 	beforeAll(() => {
 		lambda = new aws.Lambda({region: awsRegion});
+		s3 = new aws.S3({region: awsRegion, signatureVersion: 'v4'});
 	});
 	beforeEach(() => {
 		workingdir = tmppath();
@@ -186,8 +187,7 @@ describe('update', () => {
 		});
 
 		it('uses a s3 bucket if provided', done => {
-			const s3 = new aws.S3(),
-				logger = new ArrayLogger(),
+			const logger = new ArrayLogger(),
 				bucketName = testRunName + '-bucket';
 			let archivePath;
 			s3.createBucket({
@@ -217,8 +217,7 @@ describe('update', () => {
 		});
 
 		it('uses a s3 bucket with server side encryption if provided', done => {
-			const s3 = new aws.S3(),
-				logger = new ArrayLogger(),
+			const logger = new ArrayLogger(),
 				bucketName = testRunName + '-bucket',
 				serverSideEncryption = 'AES256';
 			let archivePath;
@@ -656,9 +655,11 @@ describe('update', () => {
 		});
 	});
 	describe('runtime', () => {
+		const initialRuntime = 'nodejs8.10',
+			newRuntime = 'nodejs10.x';
 		beforeEach(done => {
 			fsUtil.copy('spec/test-projects/hello-world', workingdir, true);
-			create({name: testRunName, runtime: 'nodejs6.10', region: awsRegion, source: workingdir, handler: 'main.handler'}).then(result => {
+			create({name: testRunName, runtime: initialRuntime, region: awsRegion, source: workingdir, handler: 'main.handler'}).then(result => {
 				newObjects.lambdaRole = result.lambda && result.lambda.role;
 				newObjects.lambdaFunction = result.lambda && result.lambda.name;
 			}).then(done, done.fail);
@@ -666,17 +667,17 @@ describe('update', () => {
 		it('does not change the runtime if not provided', done => {
 			underTest({source: workingdir, version: 'new'})
 			.then(() => getLambdaConfiguration('new'))
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs6.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(initialRuntime))
 			.then(() => getLambdaConfiguration())
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs6.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(initialRuntime))
 			.then(done, done.fail);
 		});
 		it('can update the runtime when requested', done => {
-			underTest({source: workingdir, version: 'new', runtime: 'nodejs8.10'})
+			underTest({source: workingdir, version: 'new', runtime: newRuntime})
 			.then(() => getLambdaConfiguration('new'))
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs8.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(newRuntime))
 			.then(() => getLambdaConfiguration())
-			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual('nodejs8.10'))
+			.then(lambdaResult => expect(lambdaResult.Runtime).toEqual(newRuntime))
 			.then(done, done.fail);
 		});
 	});
@@ -912,7 +913,7 @@ describe('update', () => {
 	describe('layer support', () => {
 		let layers;
 		const createLayer = function (layerName, filePath) {
-				return lambdaCode(filePath)
+				return lambdaCode(s3, filePath)
 					.then(contents => lambda.publishLayerVersion({LayerName: layerName, Content: contents}).promise());
 			},
 			deleteLayer = function (layer) {
